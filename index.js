@@ -1,4 +1,6 @@
+require('dotenv').config()
 const express = require('express')
+const Person = require('./models/person')
 var morgan = require('morgan')
 const app = express()
 
@@ -34,65 +36,101 @@ let persons = [
     }
 ]
 
+const errorHandler = (error, request, response, next) => {
+  console.error(error.message)
+
+  if (error.name === 'CastError') {
+    return response.status(400).send({ error: 'malformatted id' })
+  } 
+
+  next(error)
+}
+
 app.get("/api/persons", (request, response) => {
+    Person.find({}).then(persons => {
     response.json(persons)
+  })
 })
 
 app.get("/info", (request, response) => {
+  Person.find({}).then(persons => {
     response.writeHead(200, { 'Content-Type': 'text/plain' })
     response.end(`Phonebook has info for ${persons.length} people`)
+  })
 })
 
-app.get("/api/persons/:id", (request, response) => {
+app.get("/api/persons/:id", (request, response, next) => {
     const id = request.params.id
-    const person = persons.find(person => person.id === id)
-
-    if (person) {
+    const person = Person.findById(id).then(person => {
+      if (person) {
         response.json(person)
-    } else {
+      } else {
         response.status(404).end()
-    }
+      }
+    })
+    .catch(error => next(error))
 })
 
 app.delete("/api/persons/:id", (request, response) => {
     const id = request.params.id
-    persons = persons.filter(person => person.id !== id)
-
-    response.status(204).end()
+    Person.findByIdAndDelete(request.params.id)
+    .then(result => {
+      response.status(204).end()
+    })
+    .catch(error => next(error))
 })
 
 app.post("/api/persons", (request, response) => {
-    const person = request.body
-    console.log(person);
+    const body = request.body
+    console.log(body);
 
-    if (!person.name || !person.number) {
+    if (!body.name || !body.number) {
         const errorResponse = {
             "error": "Name and number are mandatory"
         }
         response.status(400).json(errorResponse)
     }
-    const existingPerson = persons.find(exist => exist.name === person.name)
-    if (existingPerson) {
-        const errorResponse = {
-            "error": "name must be unique"
+    //TODO: Find a person with existing name
+    const person = new Person({
+      name: body.name,
+      number: body.number,
+    })
+
+    person.save().then(savedPerson => {
+      response.json(savedPerson)
+    })
+    .catch(error => {
+      console.log(error._message);
+      
+      const errorResponse = {
+            "error": error._message
         }
-        response.status(400).json(errorResponse)
-    }
-
-    person.id = getRandomIntInclusive(6, 100)
-    persons = persons.concat(person)
-
-    response.json(person)
+      response.status(500).json(errorResponse)
+    })
 })
 
-function getRandomIntInclusive(min, max) {
-  min = Math.ceil(min); // Ensure min is an integer
-  max = Math.floor(max); // Ensure max is an integer
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+app.put("/api/persons/:id", (request,response,next) => {
+  const { name, number } = request.body
+  
+  Person.findById(request.params.id)
+  .then(person => {
+    if (!person) {
+      return response.status(404).end()
+    }
+
+    person.number = number
+
+    return person.save().then(updatedPerson => {
+      response.json(updatedPerson)
+    })
+  })
+  .catch(error => next(error))
+})
+
+app.use(errorHandler)
 
 
-const PORT = 3001
+const PORT = process.env.PORT
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
 })
